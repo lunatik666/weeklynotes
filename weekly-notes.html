@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekly Notes</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    html, body { margin: 0; padding: 0; background: #0E0E0E; }
+    body { font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0E0E0E; }
+    ::-webkit-scrollbar-thumb { background: #E63946; }
+    .pre-load { color: #F2EDE4; font-family: monospace; padding: 2rem; letter-spacing: 0.2em; text-transform: uppercase; font-size: 11px; opacity: 0.5; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .sync-dot-pulse { animation: pulse-dot 1.2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"><div class="pre-load">loading…</div></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    const MS_WEEK = 7 * 24 * 60 * 60 * 1000;
+    function startOfSunday(d) { const x = new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate() - x.getDay()); return x; }
+    function firstWeekStartOfYear(year) { return startOfSunday(new Date(year, 0, 1, 0, 0, 0, 0)); }
+    function getWeekInfo(date) {
+      const ws = startOfSunday(date);
+      const year = ws.getFullYear();
+      const anchor = firstWeekStartOfYear(year);
+      let weekNum = Math.round((ws - anchor) / MS_WEEK) + 1;
+      if (weekNum < 1) {
+        const prevAnchor = firstWeekStartOfYear(year - 1);
+        weekNum = Math.round((ws - prevAnchor) / MS_WEEK) + 1;
+        return { year: year - 1, weekNum, weekStart: ws };
+      }
+      return { year, weekNum, weekStart: ws };
+    }
+    function weeksInYear(year) {
+      const a = firstWeekStartOfYear(year);
+      const b = firstWeekStartOfYear(year + 1);
+      return Math.round((b - a) / MS_WEEK);
+    }
+    function weekStartFor(year, weekNum) {
+      const anchor = firstWeekStartOfYear(year);
+      return new Date(anchor.getTime() + (weekNum - 1) * MS_WEEK);
+    }
+    function fmtDate(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+    function fmtRange(weekStart) {
+      const end = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+      return fmtDate(weekStart) + " — " + fmtDate(end);
+    }
+    function keyFor(year, weekNum) { return year + "-W" + String(weekNum).padStart(2, "0"); }
+
+    function exportAllMarkdown(allData) {
+      const lines = ["# Weekly Notes", "", "> Synced " + new Date().toISOString(), ""];
+      const years = Object.keys(allData).map(Number).sort((a, b) => b - a);
+      for (const year of years) {
+        const yearData = allData[year] || {};
+        const weekKeys = Object.keys(yearData).filter((k) => (yearData[k] || []).length > 0);
+        if (weekKeys.length === 0) continue;
+        lines.push("## " + year);
+        lines.push("");
+        const total = weeksInYear(year);
+        for (let w = 1; w <= total; w++) {
+          const k = keyFor(year, w);
+          const bullets = yearData[k] || [];
+          if (bullets.length === 0) continue;
+          const ws = weekStartFor(year, w);
+          lines.push("### W" + String(w).padStart(2, "0") + " · " + fmtRange(ws));
+          for (const b of bullets) lines.push("- " + b);
+          lines.push("");
+        }
+      }
+      return lines.join("\n");
+    }
+
+    function parseAllMarkdown(md) {
+      const out = {};
+      let curYear = null, curKey = null;
+      const legacyYearMatch = md.match(/^#\s+Weekly Notes\s+(\d{4})/im);
+      const legacyMode = !!legacyYearMatch && !/^##\s+\d{4}\s*$/m.test(md);
+      if (legacyMode) {
+        curYear = parseInt(legacyYearMatch[1], 10);
+        out[curYear] = {};
+        for (const raw of md.split(/\r?\n/)) {
+          const line = raw.trimEnd();
+          const wMatch = line.match(/^##\s+W(\d{1,2})/i);
+          if (wMatch) {
+            const w = parseInt(wMatch[1], 10);
+            curKey = keyFor(curYear, w);
+            if (!out[curYear][curKey]) out[curYear][curKey] = [];
+            continue;
+          }
+          const bMatch = line.match(/^-\s+(.+)$/);
+          if (bMatch && curKey) out[curYear][curKey].push(bMatch[1]);
+        }
+        return out;
+      }
+      for (const raw of md.split(/\r?\n/)) {
+        const line = raw.trimEnd();
+        const yMatch = line.match(/^##\s+(\d{4})\s*$/);
+        if (yMatch) {
+          curYear = parseInt(yMatch[1], 10);
+          if (!out[curYear]) out[curYear] = {};
+          curKey = null;
+          continue;
+        }
+        const wMatch = line.match(/^###\s+W(\d{1,2})/i);
+        if (wMatch && curYear) {
+          const w = parseInt(wMatch[1], 10);
+          curKey = keyFor(curYear, w);
+          if (!out[curYear][curKey]) out[curYear][curKey] = [];
+          continue;
+        }
+        const bMatch = line.match(/^-\s+(.+)$/);
+        if (bMatch && curKey && curYear) out[curYear][curKey].push(bMatch[1]);
+      }
+      return out;
+    }
+
+    function mergeAllData(a, b) {
+      const result = {};
+      const years = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+      for (const y of years) {
+        const ay = (a || {})[y] || {};
+        const by = (b || {})[y] || {};
+        const weeks = new Set([...Object.keys(ay), ...Object.keys(by)]);
+        result[y] = {};
+        for (const wk of weeks) {
+          const seen = new Set();
+          const merged = [];
+          for (const x of [...(ay[wk] || []), ...(by[wk] || [])]) {
+            if (!seen.has(x)) { seen.add(x); merged.push(x); }
+          }
+          if (merged.length > 0) result[y][wk] = merged;
+        }
+      }
+      return result;
+    }
+
+    const STORAGE_KEY_PREFIX = "weekly-notes:";
+    const META_KEYS = {
+      CLIENT_ID: "weekly-notes:meta:clientId",
+      FOLDER_ID: "weekly-notes:meta:folderId",
+      FILE_ID: "weekly-notes:meta:fileId",
+      LAST_SYNCED_MD: "weekly-notes:meta:lastSyncedMd",
+      LAST_SYNC_TIME: "weekly-notes:meta:lastSyncTime",
+    };
+
+    function getAllLocalData() {
+      const all = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(STORAGE_KEY_PREFIX) || key.startsWith("weekly-notes:meta:")) continue;
+        const yearStr = key.slice(STORAGE_KEY_PREFIX.length);
+        const year = parseInt(yearStr, 10);
+        if (isNaN(year)) continue;
+        try { all[year] = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) {}
+      }
+      return all;
+    }
+
+    function writeAllLocalData(all) {
+      const existingYears = new Set();
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_KEY_PREFIX) && !key.startsWith("weekly-notes:meta:")) {
+          existingYears.add(key.slice(STORAGE_KEY_PREFIX.length));
+        }
+      }
+      const newYears = new Set(Object.keys(all));
+      for (const y of existingYears) {
+        if (!newYears.has(y)) localStorage.removeItem(STORAGE_KEY_PREFIX + y);
+      }
+      for (const y of Object.keys(all)) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + y, JSON.stringify(all[y] || {}));
+      }
+    }
+
+    const APP_TAG = "weekly-notes-v1";
+    const FILE_NAME = "weekly-notes.md";
+
+    async function driveFetch(url, token, opts) {
+      const o = opts || {};
+      const res = await fetch(url, {
+        ...o,
+        headers: { "Authorization": "Bearer " + token, ...(o.headers || {}) },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        const err = new Error("Drive API " + res.status + ": " + txt.slice(0, 200));
+        err.status = res.status;
+        throw err;
+      }
+      return res;
+    }
+
+    async function findExistingFile(token) {
+      const q = encodeURIComponent("appProperties has { key='app' and value='" + APP_TAG + "' } and trashed=false");
+      const res = await driveFetch(
+        "https://www.googleapis.com/drive/v3/files?q=" + q + "&fields=files(id,name,modifiedTime)&spaces=drive",
+        token
+      );
+      const data = await res.json();
+      return (data.files && data.files[0]) || null;
+    }
+
+    async function createDriveFile(token, content, folderId) {
+      const metadata = { name: FILE_NAME, mimeType: "text/markdown", appProperties: { app: APP_TAG } };
+      if (folderId) metadata.parents = [folderId];
+      const boundary = "----weekly" + Math.random().toString(36).slice(2);
+      const body =
+        "--" + boundary + "\r\n" +
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+        JSON.stringify(metadata) + "\r\n" +
+        "--" + boundary + "\r\n" +
+        "Content-Type: text/markdown\r\n\r\n" +
+        content + "\r\n" +
+        "--" + boundary + "--";
+      const res = await driveFetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime",
+        token,
+        { method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + boundary }, body }
+      );
+      return res.json();
+    }
+
+    async function updateDriveFile(token, fileId, content) {
+      const res = await driveFetch(
+        "https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media&fields=id,modifiedTime",
+        token,
+        { method: "PATCH", headers: { "Content-Type": "text/markdown" }, body: content }
+      );
+      return res.json();
+    }
+
+    async function readDriveFile(token, fileId) {
+      const res = await driveFetch(
+        "https://www.googleapis.com/drive/v3/files/" + fileId + "?alt=media",
+        token
+      );
+      return res.text();
+    }
+
+    function useDriveSync({ onPulled, onError }) {
+      const [clientId, setClientId] = useState(() => localStorage.getItem(META_KEYS.CLIENT_ID) || "");
+      const [folderId, setFolderId] = useState(() => localStorage.getItem(META_KEYS.FOLDER_ID) || "");
+      const [accessToken, setAccessToken] = useState(null);
+      const [status, setStatus] = useState("disconnected");
+      const [lastSyncAt, setLastSyncAt] = useState(() => {
+        const t = localStorage.getItem(META_KEYS.LAST_SYNC_TIME);
+        return t ? new Date(parseInt(t, 10)) : null;
+      });
+      const [errorMsg, setErrorMsg] = useState("");
+
+      const tokenClientRef = useRef(null);
+      const pushTimerRef = useRef(null);
+      const inFlightRef = useRef(false);
+      const tokenExpiresAtRef = useRef(0);
+
+      const isFileProtocol = typeof location !== "undefined" && location.protocol === "file:";
+
+      useEffect(() => {
+        if (!clientId) return;
+        if (isFileProtocol) {
+          setStatus("error");
+          setErrorMsg("Open via http://localhost — OAuth doesn't work from file://");
+          return;
+        }
+        const init = () => {
+          if (!(window.google && window.google.accounts && window.google.accounts.oauth2)) {
+            setTimeout(init, 300);
+            return;
+          }
+          try {
+            tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+              client_id: clientId,
+              scope: "https://www.googleapis.com/auth/drive.file",
+              callback: (resp) => {
+                if (resp && resp.access_token) {
+                  setAccessToken(resp.access_token);
+                  tokenExpiresAtRef.current = Date.now() + (parseInt(resp.expires_in, 10) - 60) * 1000;
+                  setErrorMsg("");
+                } else if (resp && resp.error) {
+                  setStatus("error");
+                  setErrorMsg("Auth failed: " + resp.error);
+                }
+              },
+              error_callback: (err) => {
+                setStatus("error");
+                setErrorMsg("Auth error: " + (err && err.type ? err.type : "unknown"));
+              },
+            });
+          } catch (e) {
+            setStatus("error");
+            setErrorMsg("Init failed: " + e.message);
+          }
+        };
+        init();
+      }, [clientId, isFileProtocol]);
+
+      const saveClientId = useCallback((id) => {
+        const trimmed = (id || "").trim();
+        if (trimmed) localStorage.setItem(META_KEYS.CLIENT_ID, trimmed);
+        else localStorage.removeItem(META_KEYS.CLIENT_ID);
+        setClientId(trimmed);
+      }, []);
+
+      const saveFolderId = useCallback((id) => {
+        const trimmed = (id || "").trim();
+        if (trimmed) localStorage.setItem(META_KEYS.FOLDER_ID, trimmed);
+        else localStorage.removeItem(META_KEYS.FOLDER_ID);
+        setFolderId(trimmed);
+      }, []);
+
+      const connect = useCallback(() => {
+        if (!tokenClientRef.current) {
+          setErrorMsg("Token client not ready. Wait a moment and retry.");
+          return;
+        }
+        setStatus("connecting");
+        try {
+          tokenClientRef.current.requestAccessToken({ prompt: "consent" });
+        } catch (e) {
+          setStatus("error");
+          setErrorMsg(e.message);
+        }
+      }, []);
+
+      const disconnect = useCallback(() => {
+        if (accessToken && window.google && window.google.accounts && window.google.accounts.oauth2) {
+          try { window.google.accounts.oauth2.revoke(accessToken, () => {}); } catch (e) {}
+        }
+        setAccessToken(null);
+        setStatus("disconnected");
+      }, [accessToken]);
+
+      const ensureFile = useCallback(async (token) => {
+        let fileId = localStorage.getItem(META_KEYS.FILE_ID);
+        if (fileId) {
+          try {
+            await driveFetch("https://www.googleapis.com/drive/v3/files/" + fileId + "?fields=id", token);
+            return fileId;
+          } catch (e) {
+            if (e.status === 404) fileId = null;
+            else throw e;
+          }
+        }
+        const found = await findExistingFile(token);
+        if (found) {
+          localStorage.setItem(META_KEYS.FILE_ID, found.id);
+          return found.id;
+        }
+        const initialMd = exportAllMarkdown(getAllLocalData());
+        const created = await createDriveFile(token, initialMd, folderId);
+        localStorage.setItem(META_KEYS.FILE_ID, created.id);
+        localStorage.setItem(META_KEYS.LAST_SYNCED_MD, initialMd);
+        return created.id;
+      }, [folderId]);
+
+      const pullNow = useCallback(async (token, opts) => {
+        const o = opts || {};
+        const forceReplace = !!o.forceReplace;
+        const fileId = await ensureFile(token);
+        const remoteMd = await readDriveFile(token, fileId);
+        const remoteData = parseAllMarkdown(remoteMd || "");
+        const localData = getAllLocalData();
+        const lastSyncedMd = localStorage.getItem(META_KEYS.LAST_SYNCED_MD) || "";
+        const localMd = exportAllMarkdown(localData);
+        const hasLocalChanges = !forceReplace && localMd !== lastSyncedMd && localMd.length > 20;
+
+        let finalData;
+        if (hasLocalChanges) finalData = mergeAllData(localData, remoteData);
+        else finalData = remoteData;
+        writeAllLocalData(finalData);
+        const finalMd = exportAllMarkdown(finalData);
+        localStorage.setItem(META_KEYS.LAST_SYNCED_MD, finalMd);
+        if (hasLocalChanges && finalMd !== remoteMd) {
+          await updateDriveFile(token, fileId, finalMd);
+        }
+        const now = Date.now();
+        localStorage.setItem(META_KEYS.LAST_SYNC_TIME, String(now));
+        setLastSyncAt(new Date(now));
+        if (onPulled) onPulled(finalData);
+        return finalData;
+      }, [ensureFile, onPulled]);
+
+      const pushNow = useCallback(async (token) => {
+        const fileId = await ensureFile(token);
+        const localMd = exportAllMarkdown(getAllLocalData());
+        const lastSyncedMd = localStorage.getItem(META_KEYS.LAST_SYNCED_MD) || "";
+        if (localMd === lastSyncedMd) return;
+        await updateDriveFile(token, fileId, localMd);
+        localStorage.setItem(META_KEYS.LAST_SYNCED_MD, localMd);
+        const now = Date.now();
+        localStorage.setItem(META_KEYS.LAST_SYNC_TIME, String(now));
+        setLastSyncAt(new Date(now));
+      }, [ensureFile]);
+
+      useEffect(() => {
+        if (!accessToken) return;
+        let cancelled = false;
+        (async () => {
+          if (inFlightRef.current) return;
+          inFlightRef.current = true;
+          setStatus("syncing");
+          try {
+            await pullNow(accessToken);
+            if (!cancelled) { setStatus("synced"); setErrorMsg(""); }
+          } catch (e) {
+            if (!cancelled) {
+              setStatus("error");
+              setErrorMsg(e.message || String(e));
+              if (onError) onError(e);
+            }
+          } finally { inFlightRef.current = false; }
+        })();
+        return () => { cancelled = true; };
+      }, [accessToken, pullNow, onError]);
+
+      const requestPush = useCallback(() => {
+        if (!accessToken) return;
+        if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = setTimeout(async () => {
+          if (inFlightRef.current) return;
+          if (Date.now() > tokenExpiresAtRef.current && tokenClientRef.current) {
+            try { tokenClientRef.current.requestAccessToken({ prompt: "" }); } catch (e) {}
+            return;
+          }
+          inFlightRef.current = true;
+          setStatus("syncing");
+          try {
+            await pushNow(accessToken);
+            setStatus("synced");
+            setErrorMsg("");
+          } catch (e) {
+            setStatus("error");
+            setErrorMsg(e.message || String(e));
+            if (onError) onError(e);
+          } finally { inFlightRef.current = false; }
+        }, 2000);
+      }, [accessToken, pushNow, onError]);
+
+      const syncNow = useCallback(async () => {
+        if (!accessToken) { connect(); return; }
+        if (inFlightRef.current) return;
+        inFlightRef.current = true;
+        setStatus("syncing");
+        try {
+          await pullNow(accessToken);
+          await pushNow(accessToken);
+          setStatus("synced");
+          setErrorMsg("");
+        } catch (e) {
+          setStatus("error");
+          setErrorMsg(e.message || String(e));
+        } finally { inFlightRef.current = false; }
+      }, [accessToken, pullNow, pushNow, connect]);
+
+      useEffect(() => {
+        const onOff = () => { if (!navigator.onLine) setStatus("offline"); };
+        const onOn = () => { if (accessToken) requestPush(); };
+        window.addEventListener("offline", onOff);
+        window.addEventListener("online", onOn);
+        return () => {
+          window.removeEventListener("offline", onOff);
+          window.removeEventListener("online", onOn);
+        };
+      }, [accessToken, requestPush]);
+
+      return {
+        clientId, saveClientId,
+        folderId, saveFolderId,
+        accessToken,
+        status, errorMsg, lastSyncAt,
+        connect, disconnect, requestPush, syncNow,
+        isFileProtocol,
+        configured: !!clientId,
+      };
+    }
+
+    function FocusCard({ year, weekNum, bullets, isCurrent, onChange, big }) {
+      const [draft, setDraft] = useState("");
+      const ws = weekStartFor(year, weekNum);
+      const addBullet = () => {
+        const v = draft.trim();
+        if (!v) return;
+        onChange([...bullets, v]);
+        setDraft("");
+      };
+      const removeBullet = (i) => onChange(bullets.filter((_, idx) => idx !== i));
+      const editBullet = (i, v) => {
+        const next = [...bullets];
+        next[i] = v;
+        onChange(next);
+      };
+      return (
+        <div className="relative bg-[#F2EDE4] text-[#0A0A0A] flex flex-col"
+          style={{
+            width: big ? "min(560px, 90vw)" : "100%",
+            height: big ? "min(720px, 80vh)" : "100%",
+            boxShadow: big
+              ? "0 30px 80px -20px rgba(0,0,0,0.65), 0 0 0 1px rgba(0,0,0,0.1)"
+              : "0 4px 20px -6px rgba(0,0,0,0.4)",
+          }}
+        >
+          <div className="absolute inset-0 pointer-events-none opacity-[0.06]"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 20% 30%, #000 1px, transparent 1px), radial-gradient(circle at 80% 70%, #000 1px, transparent 1px)",
+              backgroundSize: "12px 12px, 18px 18px",
+            }}
+          />
+          <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b-2 border-[#0A0A0A] relative z-10">
+            <div className="font-mono text-[10px] tracking-[0.2em] uppercase">{year} · {fmtRange(ws)}</div>
+            {isCurrent && (
+              <div className="font-mono text-[10px] tracking-[0.25em] uppercase bg-[#E63946] text-[#F2EDE4] px-2 py-0.5">● Now</div>
+            )}
+          </div>
+          <div className="px-5 pt-3 pb-1 relative z-10">
+            <div className="leading-[0.82]"
+              style={{
+                fontFamily: "'Bebas Neue', Impact, sans-serif",
+                fontSize: big ? "11rem" : "5rem",
+                letterSpacing: "-0.03em",
+              }}
+            >W{String(weekNum).padStart(2, "0")}</div>
+          </div>
+          <div className="flex-1 px-5 pb-3 overflow-y-auto relative z-10 min-h-0">
+            <ul className="space-y-1.5">
+              {bullets.map((b, i) => (
+                <li key={i} className="group flex items-start gap-2 font-mono text-[14px] leading-snug">
+                  <span className="select-none text-[#E63946] font-bold mt-[2px]">▸</span>
+                  {big ? (
+                    <input
+                      className="flex-1 bg-transparent border-b border-transparent focus:border-[#0A0A0A] outline-none py-0.5"
+                      value={b}
+                      onChange={(e) => editBullet(i, e.target.value)}
+                    />
+                  ) : (
+                    <span className="flex-1 truncate">{b}</span>
+                  )}
+                  {big && (
+                    <button
+                      onClick={() => removeBullet(i)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] uppercase tracking-wider hover:text-[#E63946]"
+                      title="Remove"
+                    >✕</button>
+                  )}
+                </li>
+              ))}
+              {bullets.length === 0 && !big && (
+                <li className="font-mono text-[12px] italic text-[#0A0A0A]/40">— empty —</li>
+              )}
+            </ul>
+          </div>
+          {big && (
+            <div className="px-5 py-3 border-t-2 border-[#0A0A0A] relative z-10 bg-[#F2EDE4]">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[#E63946] font-bold">▸</span>
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addBullet(); }}
+                  placeholder="Add a bullet… (Enter)"
+                  className="flex-1 bg-transparent outline-none font-mono text-[14px] placeholder:text-[#0A0A0A]/30"
+                />
+                <button
+                  onClick={addBullet}
+                  className="font-mono text-[10px] uppercase tracking-[0.2em] bg-[#0A0A0A] text-[#F2EDE4] px-3 py-1.5 hover:bg-[#E63946] transition-colors"
+                >Add</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function GridCell({ weekNum, bullets, isCurrent, onClick }) {
+      const filled = bullets.length;
+      return (
+        <button
+          onClick={onClick}
+          className="relative aspect-square bg-[#F2EDE4] text-[#0A0A0A] flex flex-col items-start justify-between p-2 hover:bg-[#E63946] hover:text-[#F2EDE4] transition-colors text-left group"
+          style={{ boxShadow: isCurrent ? "inset 0 0 0 3px #E63946" : "inset 0 0 0 1px rgba(0,0,0,0.15)" }}
+        >
+          <div className="font-mono text-[9px] tracking-[0.15em] uppercase opacity-60 group-hover:opacity-100">
+            {isCurrent ? "● now" : "w" + String(weekNum).padStart(2, "0")}
+          </div>
+          <div className="leading-none"
+            style={{
+              fontFamily: "'Bebas Neue', Impact, sans-serif",
+              fontSize: "clamp(1.2rem, 3vw, 2.2rem)",
+              letterSpacing: "-0.02em",
+            }}
+          >{String(weekNum).padStart(2, "0")}</div>
+          <div className="flex gap-[2px] flex-wrap">
+            {Array.from({ length: Math.min(filled, 8) }).map((_, i) => (
+              <span key={i} className="w-1 h-1 bg-current" />
+            ))}
+            {filled > 8 && <span className="font-mono text-[9px]">+{filled - 8}</span>}
+          </div>
+        </button>
+      );
+    }
+
+    function SyncIndicator({ status, lastSyncAt, onClick }) {
+      const colors = {
+        disconnected: "#6B7280",
+        connecting: "#3B82F6",
+        syncing: "#F5D547",
+        synced: "#34D399",
+        error: "#E63946",
+        offline: "#9CA3AF",
+      };
+      const labels = {
+        disconnected: "Offline",
+        connecting: "Auth…",
+        syncing: "Syncing",
+        synced: "Synced",
+        error: "Error",
+        offline: "Offline",
+      };
+      const isPulse = status === "connecting" || status === "syncing";
+      const fmtLast = (d) => {
+        if (!d) return "";
+        const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+        if (diff < 60) return diff + "s ago";
+        if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+        if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+        return Math.floor(diff / 86400) + "d ago";
+      };
+      return (
+        <button
+          onClick={onClick}
+          className="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase border border-[#F2EDE4]/30 px-2.5 py-1 hover:bg-[#F2EDE4]/10"
+          title="Open sync settings"
+        >
+          <span
+            className={"w-2 h-2 rounded-full " + (isPulse ? "sync-dot-pulse" : "")}
+            style={{ background: colors[status] || colors.disconnected }}
+          />
+          <span>{labels[status] || status}</span>
+          {status === "synced" && lastSyncAt && (
+            <span className="opacity-50">· {fmtLast(lastSyncAt)}</span>
+          )}
+        </button>
+      );
+    }
+
+    function SettingsModal({ open, onClose, sync, onForceImportMd, onExportMd }) {
+      const [draftClient, setDraftClient] = useState(sync.clientId || "");
+      const [draftFolder, setDraftFolder] = useState(sync.folderId || "");
+      useEffect(() => { setDraftClient(sync.clientId || ""); }, [sync.clientId, open]);
+      useEffect(() => { setDraftFolder(sync.folderId || ""); }, [sync.folderId, open]);
+      if (!open) return null;
+      return (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
+          <div
+            className="bg-[#0E0E0E] border-2 border-[#F2EDE4]/20 max-w-[640px] w-full max-h-[90vh] overflow-y-auto text-[#F2EDE4]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#F2EDE4]/15">
+              <div style={{ fontFamily: "'Bebas Neue', Impact, sans-serif", fontSize: "1.6rem", letterSpacing: "0.02em", lineHeight: 1 }}>
+                SYNC SETTINGS
+              </div>
+              <button onClick={onClose} className="font-mono text-[14px] opacity-60 hover:opacity-100">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-6">
+              <div>
+                <div className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 mb-2">Status</div>
+                <div className="font-mono text-[13px]">
+                  {sync.status.toUpperCase()}
+                  {sync.lastSyncAt && <span className="opacity-50"> · last {sync.lastSyncAt.toLocaleString()}</span>}
+                </div>
+                {sync.errorMsg && (
+                  <div className="mt-2 font-mono text-[11px] text-[#E63946] break-words">{sync.errorMsg}</div>
+                )}
+                {sync.isFileProtocol && (
+                  <div className="mt-2 font-mono text-[11px] text-[#F5D547] break-words">
+                    ⚠ Running via file://. Google OAuth requires http(s). Open via a local server (see setup below).
+                  </div>
+                )}
+              </div>
+
+              <details className="border border-[#F2EDE4]/15 p-3">
+                <summary className="cursor-pointer font-mono text-[11px] tracking-[0.25em] uppercase">
+                  ▸ One-time setup (Google Cloud)
+                </summary>
+                <ol className="mt-3 space-y-2 font-mono text-[12px] leading-relaxed opacity-85 list-decimal pl-5">
+                  <li>Go to <a href="https://console.cloud.google.com" target="_blank" className="underline text-[#E63946]">console.cloud.google.com</a> and create a new project</li>
+                  <li>APIs &amp; Services → Library → search "Google Drive API" → Enable</li>
+                  <li>APIs &amp; Services → OAuth consent screen → External → fill app name + your email. Add yourself as a Test User</li>
+                  <li>APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID → Web application</li>
+                  <li>Authorized JavaScript origins → add <code className="bg-[#F2EDE4]/10 px-1">http://localhost:8000</code></li>
+                  <li>Copy the Client ID and paste below</li>
+                  <li>Run local server in this file's folder:<br/>
+                    <code className="bg-[#F2EDE4]/10 px-1 inline-block mt-1">python3 -m http.server 8000</code><br/>
+                    then open <code className="bg-[#F2EDE4]/10 px-1">http://localhost:8000/weekly-notes.html</code>
+                  </li>
+                </ol>
+              </details>
+
+              <div>
+                <label className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 mb-1 block">OAuth Client ID</label>
+                <input
+                  value={draftClient}
+                  onChange={(e) => setDraftClient(e.target.value)}
+                  placeholder="123456789-abcdef.apps.googleusercontent.com"
+                  className="w-full bg-[#F2EDE4]/5 border border-[#F2EDE4]/20 px-3 py-2 font-mono text-[12px] outline-none focus:border-[#E63946]"
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => sync.saveClientId(draftClient)}
+                    className="font-mono text-[10px] tracking-[0.2em] uppercase bg-[#F2EDE4] text-[#0E0E0E] px-3 py-1.5 hover:bg-[#E63946] hover:text-[#F2EDE4]"
+                  >Save</button>
+                  {sync.clientId && (
+                    <button
+                      onClick={() => { sync.saveClientId(""); sync.disconnect(); }}
+                      className="font-mono text-[10px] tracking-[0.2em] uppercase border border-[#F2EDE4]/30 px-3 py-1.5 hover:bg-[#F2EDE4]/10"
+                    >Clear</button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 mb-1 block">
+                  Drive Folder ID <span className="opacity-50">(optional — leave empty for My Drive root)</span>
+                </label>
+                <input
+                  value={draftFolder}
+                  onChange={(e) => setDraftFolder(e.target.value)}
+                  placeholder="1aB2cD3eF4..."
+                  className="w-full bg-[#F2EDE4]/5 border border-[#F2EDE4]/20 px-3 py-2 font-mono text-[12px] outline-none focus:border-[#E63946]"
+                />
+                <div className="font-mono text-[10px] opacity-50 mt-1">
+                  Open the folder in Drive — ID is the last segment of the URL
+                </div>
+                <button
+                  onClick={() => sync.saveFolderId(draftFolder)}
+                  className="mt-2 font-mono text-[10px] tracking-[0.2em] uppercase border border-[#F2EDE4]/30 px-3 py-1.5 hover:bg-[#F2EDE4]/10"
+                >Save folder</button>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-[#F2EDE4]/10">
+                {!sync.accessToken && sync.configured && !sync.isFileProtocol && (
+                  <button
+                    onClick={sync.connect}
+                    className="font-mono text-[11px] tracking-[0.25em] uppercase bg-[#E63946] text-[#F2EDE4] px-3 py-2 hover:bg-[#F2EDE4] hover:text-[#E63946]"
+                  >Connect Google Drive</button>
+                )}
+                {sync.accessToken && (
+                  <React.Fragment>
+                    <button
+                      onClick={sync.syncNow}
+                      className="font-mono text-[11px] tracking-[0.25em] uppercase bg-[#34D399] text-[#0E0E0E] px-3 py-2 hover:bg-[#F2EDE4]"
+                    >Sync now</button>
+                    <button
+                      onClick={sync.disconnect}
+                      className="font-mono text-[11px] tracking-[0.25em] uppercase border border-[#F2EDE4]/30 px-3 py-2 hover:bg-[#F2EDE4]/10"
+                    >Disconnect</button>
+                  </React.Fragment>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-[#F2EDE4]/10">
+                <div className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 mb-2">Manual backup (.md)</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onExportMd}
+                    className="font-mono text-[10px] tracking-[0.2em] uppercase border border-[#F2EDE4]/30 px-3 py-1.5 hover:bg-[#F2EDE4]/10"
+                  >↓ Export all</button>
+                  <button
+                    onClick={onForceImportMd}
+                    className="font-mono text-[10px] tracking-[0.2em] uppercase border border-[#F2EDE4]/30 px-3 py-1.5 hover:bg-[#F2EDE4]/10"
+                  >↑ Import .md</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function WeeklyNotes() {
+      const today = useMemo(() => new Date(), []);
+      const todayInfo = useMemo(() => getWeekInfo(today), [today]);
+      const [year, setYear] = useState(todayInfo.year);
+      const totalWeeks = useMemo(() => weeksInYear(year), [year]);
+
+      const [data, setDataState] = useState({});
+      const [loaded, setLoaded] = useState(false);
+      const reloadYear = useCallback((y) => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_PREFIX + y);
+          setDataState(raw ? JSON.parse(raw) : {});
+        } catch (e) { setDataState({}); }
+        setLoaded(true);
+      }, []);
+      useEffect(() => { reloadYear(year); }, [year, reloadYear]);
+
+      const sync = useDriveSync({
+        onPulled: () => reloadYear(year),
+        onError: (e) => console.error("Sync error:", e),
+      });
+
+      const persistYear = useCallback((next) => {
+        setDataState(next);
+        try { localStorage.setItem(STORAGE_KEY_PREFIX + year, JSON.stringify(next)); }
+        catch (e) { console.error(e); }
+        sync.requestPush();
+      }, [year, sync]);
+
+      const [view, setView] = useState("carousel");
+      const [activeWeek, setActiveWeek] = useState(todayInfo.year === year ? todayInfo.weekNum : 1);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const animRef = useRef(null);
+
+      useEffect(() => {
+        if (year === todayInfo.year) setActiveWeek(todayInfo.weekNum);
+        else setActiveWeek(1);
+      }, [year, todayInfo.year, todayInfo.weekNum]);
+
+      const updateWeek = useCallback((w, bullets) => {
+        const k = keyFor(year, w);
+        const next = { ...data };
+        if (bullets.length === 0) delete next[k];
+        else next[k] = bullets;
+        persistYear(next);
+      }, [data, year, persistYear]);
+
+      const scrollToWeek = useCallback((targetWeek, instant = false) => {
+        const start = activeWeek;
+        const dur = instant ? 0 : Math.min(1800, 60 + Math.abs(targetWeek - start) * 35);
+        const t0 = performance.now();
+        if (animRef.current) cancelAnimationFrame(animRef.current);
+        const step = (now) => {
+          const t = dur === 0 ? 1 : Math.min(1, (now - t0) / dur);
+          const e = 1 - Math.pow(1 - t, 3);
+          const cur = Math.round(start + (targetWeek - start) * e);
+          setActiveWeek(cur);
+          if (t < 1) animRef.current = requestAnimationFrame(step);
+        };
+        animRef.current = requestAnimationFrame(step);
+      }, [activeWeek]);
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.target.tagName === "INPUT" || settingsOpen) return;
+          if (e.key === "ArrowLeft") setActiveWeek((w) => Math.max(1, w - 1));
+          else if (e.key === "ArrowRight") setActiveWeek((w) => Math.min(totalWeeks, w + 1));
+          else if (e.key === "Home") scrollToWeek(1);
+          else if (e.key === "End") scrollToWeek(totalWeeks);
+          else if (e.key === "t" || e.key === "T") {
+            if (year !== todayInfo.year) setYear(todayInfo.year);
+            scrollToWeek(todayInfo.weekNum);
+          }
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [totalWeeks, scrollToWeek, todayInfo.year, todayInfo.weekNum, year, settingsOpen]);
+
+      const fileInputRef = useRef(null);
+      const handleExportAll = () => {
+        const md = exportAllMarkdown(getAllLocalData());
+        const blob = new Blob([md], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "weekly-notes.md";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+      const handleImportClick = () => fileInputRef.current && fileInputRef.current.click();
+      const handleImport = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = parseAllMarkdown(String(reader.result));
+            const merged = mergeAllData(getAllLocalData(), parsed);
+            writeAllLocalData(merged);
+            reloadYear(year);
+            sync.requestPush();
+          } catch (err) { alert("Parse failed: " + err.message); }
+        };
+        reader.readAsText(file);
+        e.target.value = "";
+      };
+
+      const isCurrentYear = year === todayInfo.year;
+      const visibleWeeks = useMemo(() => {
+        const a = activeWeek;
+        return [a - 1, a, a + 1].filter((w) => w >= 1 && w <= totalWeeks);
+      }, [activeWeek, totalWeeks]);
+
+      return (
+        <div className="w-full min-h-screen bg-[#0E0E0E] text-[#F2EDE4] overflow-hidden flex flex-col">
+          <header className="border-b border-[#F2EDE4]/15 px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-3 relative z-20">
+            <div className="flex items-baseline gap-4">
+              <div style={{ fontFamily: "'Bebas Neue', Impact, sans-serif", fontSize: "2rem", letterSpacing: "0.02em", lineHeight: 1 }}>
+                WEEKLY<span className="text-[#E63946]">.</span>
+              </div>
+              <div className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 hidden sm:block">
+                Sunday 00:00 boundary
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <SyncIndicator status={sync.status} lastSyncAt={sync.lastSyncAt} onClick={() => setSettingsOpen(true)} />
+              <div className="flex items-center font-mono text-[11px] tracking-widest uppercase border border-[#F2EDE4]/30">
+                <button onClick={() => setYear((y) => y - 1)} className="px-2 py-1 hover:bg-[#F2EDE4] hover:text-[#0E0E0E]">◀</button>
+                <span className="px-3 py-1 border-x border-[#F2EDE4]/30">{year}</span>
+                <button onClick={() => setYear((y) => y + 1)} className="px-2 py-1 hover:bg-[#F2EDE4] hover:text-[#0E0E0E]">▶</button>
+              </div>
+              <button
+                onClick={() => {
+                  if (!isCurrentYear) setYear(todayInfo.year);
+                  setView("carousel");
+                  setTimeout(() => scrollToWeek(todayInfo.weekNum), 50);
+                }}
+                className="font-mono text-[11px] tracking-[0.25em] uppercase bg-[#E63946] text-[#F2EDE4] px-3 py-1.5 hover:bg-[#F2EDE4] hover:text-[#E63946] transition-colors"
+                title="Press T"
+              >● Today</button>
+              <div className="flex font-mono text-[10px] tracking-widest uppercase border border-[#F2EDE4]/30">
+                {[{ id: "focus", label: "Focus" }, { id: "carousel", label: "Carousel" }, { id: "grid", label: "Year" }].map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => setView(v.id)}
+                    className={"px-2.5 py-1 " + (view === v.id ? "bg-[#F2EDE4] text-[#0E0E0E]" : "hover:bg-[#F2EDE4]/10")}
+                  >{v.label}</button>
+                ))}
+              </div>
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="font-mono text-[12px] border border-[#F2EDE4]/30 px-2.5 py-1 hover:bg-[#F2EDE4]/10"
+                title="Settings"
+              >⚙</button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".md,text/markdown,text/plain"
+                onChange={handleImport}
+                className="hidden"
+              />
+            </div>
+          </header>
+
+          <main className="flex-1 flex flex-col relative">
+            {!loaded && (
+              <div className="flex-1 flex items-center justify-center font-mono text-[11px] tracking-widest uppercase opacity-50">loading…</div>
+            )}
+
+            {loaded && view === "grid" && (
+              <div className="flex-1 overflow-y-auto p-4 sm:p-8">
+                <div className="font-mono text-[10px] tracking-[0.3em] uppercase opacity-50 mb-3">
+                  {totalWeeks} weeks · {Object.values(data).reduce((a, b) => a + b.length, 0)} bullets
+                </div>
+                <div className="grid gap-[2px]" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(82px, 1fr))" }}>
+                  {Array.from({ length: totalWeeks }).map((_, i) => {
+                    const w = i + 1;
+                    const k = keyFor(year, w);
+                    return (
+                      <GridCell
+                        key={w}
+                        weekNum={w}
+                        bullets={data[k] || []}
+                        isCurrent={isCurrentYear && w === todayInfo.weekNum}
+                        onClick={() => { setActiveWeek(w); setView("focus"); }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {loaded && (view === "carousel" || view === "focus") && (
+              <React.Fragment>
+                <div className="flex-1 flex items-center justify-center p-4 sm:p-8 relative">
+                  {view === "carousel" ? (
+                    <div className="flex items-center justify-center gap-3 sm:gap-6 w-full">
+                      {visibleWeeks.map((w) => {
+                        const isActive = w === activeWeek;
+                        const k = keyFor(year, w);
+                        return (
+                          <div
+                            key={w}
+                            onClick={() => !isActive && setActiveWeek(w)}
+                            className={"transition-all duration-300 cursor-pointer " + (isActive ? "" : "opacity-40 hover:opacity-70")}
+                            style={{
+                              flex: isActive ? "0 0 auto" : "0 0 180px",
+                              height: isActive ? "min(620px, 72vh)" : "min(360px, 50vh)",
+                              transform: isActive ? "scale(1)" : "scale(0.92)",
+                            }}
+                          >
+                            <FocusCard
+                              year={year}
+                              weekNum={w}
+                              bullets={data[k] || []}
+                              isCurrent={isCurrentYear && w === todayInfo.weekNum}
+                              onChange={(b) => updateWeek(w, b)}
+                              big={isActive}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <FocusCard
+                      year={year}
+                      weekNum={activeWeek}
+                      bullets={data[keyFor(year, activeWeek)] || []}
+                      isCurrent={isCurrentYear && activeWeek === todayInfo.weekNum}
+                      onChange={(b) => updateWeek(activeWeek, b)}
+                      big
+                    />
+                  )}
+                  <button
+                    onClick={() => setActiveWeek((w) => Math.max(1, w - 1))}
+                    disabled={activeWeek <= 1}
+                    className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center border border-[#F2EDE4]/30 hover:bg-[#F2EDE4] hover:text-[#0E0E0E] disabled:opacity-20 disabled:pointer-events-none"
+                  >◀</button>
+                  <button
+                    onClick={() => setActiveWeek((w) => Math.min(totalWeeks, w + 1))}
+                    disabled={activeWeek >= totalWeeks}
+                    className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center border border-[#F2EDE4]/30 hover:bg-[#F2EDE4] hover:text-[#0E0E0E] disabled:opacity-20 disabled:pointer-events-none"
+                  >▶</button>
+                </div>
+
+                <div className="border-t border-[#F2EDE4]/15 px-4 sm:px-8 py-3 relative z-20">
+                  <div className="flex items-center gap-3">
+                    <div className="font-mono text-[10px] tracking-[0.25em] uppercase opacity-60 w-14">
+                      W{String(activeWeek).padStart(2, "0")}
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={totalWeeks}
+                      value={activeWeek}
+                      onChange={(e) => setActiveWeek(parseInt(e.target.value, 10))}
+                      className="flex-1 accent-[#E63946]"
+                    />
+                    <div className="font-mono text-[10px] tracking-[0.25em] uppercase opacity-60 w-14 text-right">
+                      W{String(totalWeeks).padStart(2, "0")}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex gap-[2px] h-[6px]">
+                    {Array.from({ length: totalWeeks }).map((_, i) => {
+                      const w = i + 1;
+                      const has = (data[keyFor(year, w)] || []).length > 0;
+                      const isCur = isCurrentYear && w === todayInfo.weekNum;
+                      const isAct = w === activeWeek;
+                      return (
+                        <button
+                          key={w}
+                          onClick={() => setActiveWeek(w)}
+                          className="flex-1 transition-all"
+                          style={{
+                            background: isAct ? "#F2EDE4" : isCur ? "#E63946" : has ? "rgba(242,237,228,0.5)" : "rgba(242,237,228,0.12)",
+                            height: isAct ? "6px" : "4px",
+                            marginTop: isAct ? "0" : "1px",
+                          }}
+                          title={"W" + String(w).padStart(2, "0")}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              </React.Fragment>
+            )}
+          </main>
+
+          <footer className="px-4 sm:px-8 py-2 border-t border-[#F2EDE4]/10 font-mono text-[9px] tracking-[0.25em] uppercase opacity-40 flex flex-wrap justify-between gap-2">
+            <span>← → navigate · T = today · Home/End = jump</span>
+            <span>auto-sync · Google Drive</span>
+          </footer>
+
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            sync={sync}
+            onForceImportMd={handleImportClick}
+            onExportMd={handleExportAll}
+          />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<WeeklyNotes />);
+  </script>
+</body>
+</html>
