@@ -451,7 +451,7 @@
             setErrorMsg(e.message || String(e));
             if (onError) onError(e);
           } finally { inFlightRef.current = false; }
-        }, 2000);
+        }, 15000);
       }, [accessToken, pushNow, onError]);
 
       const syncNow = useCallback(async () => {
@@ -824,7 +824,7 @@
         sync.requestPush();
       }, [year, sync]);
 
-      const [view, setView] = useState("carousel");
+      const [view, setView] = useState("focus");
       const [activeWeek, setActiveWeek] = useState(todayInfo.year === year ? todayInfo.weekNum : 1);
       const [settingsOpen, setSettingsOpen] = useState(false);
       const animRef = useRef(null);
@@ -931,14 +931,14 @@
               <button
                 onClick={() => {
                   if (!isCurrentYear) setYear(todayInfo.year);
-                  setView("carousel");
+                  setView("focus");
                   setTimeout(() => scrollToWeek(todayInfo.weekNum), 50);
                 }}
                 className="font-mono text-[11px] tracking-[0.25em] uppercase bg-[#E63946] text-[#F2EDE4] px-3 py-1.5 hover:bg-[#F2EDE4] hover:text-[#E63946] transition-colors"
                 title="Press T"
               >● Today</button>
               <div className="flex font-mono text-[10px] tracking-widest uppercase border border-[#F2EDE4]/30">
-                {[{ id: "focus", label: "Focus" }, { id: "carousel", label: "Carousel" }, { id: "grid", label: "Year" }].map((v) => (
+                {[{ id: "focus", label: "Focus" }, { id: "grid", label: "Year" }].map((v) => (
                   <button
                     key={v.id}
                     onClick={() => setView(v.id)}
@@ -989,38 +989,9 @@
               </div>
             )}
 
-            {loaded && (view === "carousel" || view === "focus") && (
+            {loaded && view === "focus" && (
               <React.Fragment>
                 <div className="flex-1 flex items-center justify-center p-4 sm:p-8 relative">
-                  {view === "carousel" ? (
-                    <div className="flex items-center justify-center gap-3 sm:gap-6 w-full">
-                      {visibleWeeks.map((w) => {
-                        const isActive = w === activeWeek;
-                        const k = keyFor(year, w);
-                        return (
-                          <div
-                            key={w}
-                            onClick={() => !isActive && setActiveWeek(w)}
-                            className={"transition-all duration-300 cursor-pointer " + (isActive ? "" : "opacity-40 hover:opacity-70")}
-                            style={{
-                              flex: isActive ? "0 0 auto" : "0 0 180px",
-                              height: isActive ? "min(620px, 72vh)" : "min(360px, 50vh)",
-                              transform: isActive ? "scale(1)" : "scale(0.92)",
-                            }}
-                          >
-                            <FocusCard
-                              year={year}
-                              weekNum={w}
-                              bullets={data[k] || []}
-                              isCurrent={isCurrentYear && w === todayInfo.weekNum}
-                              onChange={(b) => updateWeek(w, b)}
-                              big={isActive}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
                     <FocusCard
                       year={year}
                       weekNum={activeWeek}
@@ -1029,7 +1000,6 @@
                       onChange={(b) => updateWeek(activeWeek, b)}
                       big
                     />
-                  )}
                   <button
                     onClick={() => setActiveWeek((w) => Math.max(1, w - 1))}
                     disabled={activeWeek <= 1}
