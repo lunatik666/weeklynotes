@@ -830,9 +830,8 @@
       const animRef = useRef(null);
 
       useEffect(() => {
-        if (year === todayInfo.year) setActiveWeek(todayInfo.weekNum);
-        else setActiveWeek(1);
-      }, [year, todayInfo.year, todayInfo.weekNum]);
+        setActiveWeek((prev) => Math.min(prev, totalWeeks));
+      }, [year, totalWeeks]);
 
       const updateWeek = useCallback((w, bullets) => {
         const k = keyFor(year, w);
